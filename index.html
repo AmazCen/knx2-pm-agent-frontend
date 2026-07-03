@@ -176,8 +176,8 @@
   .msg-row.user .msg-avatar { background: var(--user-bg); color: var(--accent-text); border: 1px solid var(--border); }
   .msg-row.agent .msg-avatar { background: var(--teal); color: #fff; }
 
-  .msg-content { flex: 1; font-size: var(--fs-base); line-height: 1.68; color: var(--text); }
-  .msg-row.user .msg-content { color: #8aaad0; }
+  .msg-content { flex: 1; font-size: var(--fs-base); line-height: 1.68; color: #ffffff; }
+  .msg-row.user .msg-content { color: #ffffff; font-family: 'Georgia', 'Times New Roman', serif; font-style: italic; }
 
   .msg-content p { margin-bottom: 9px; }
   .msg-content p:last-child { margin-bottom: 0; }
@@ -294,6 +294,17 @@
   .kb-success { color: #60c090; }
   .kb-error { color: #e06060; }
   .kb-skipped { color: var(--text-dim); }
+
+  .btn-kb-update {
+    display: none;
+    padding: 5px 12px;
+    background: none; border: 1px solid var(--teal);
+    border-radius: var(--radius); color: var(--teal);
+    font-size: var(--fs-2xs); font-weight: 600;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .btn-kb-update:hover { background: rgba(0,113,103,0.12); }
+  .btn-kb-update.visible { display: inline-flex; align-items: center; gap: 5px; }
 </style>
 </head>
 <body>
@@ -307,6 +318,7 @@
     </div>
   </div>
   <div class="header-right">
+    <button class="btn-kb-update" id="kbUpdateBtn" onclick="triggerKBUpdate()" title="Update knowledge base from this session">📝 Update KB</button>
     <div class="status-dot" id="statusDot"></div>
     <span class="status-label" id="statusLabel">Connecting…</span>
     <button class="btn-icon" onclick="toggleSidebar()" title="Toggle sidebar">☰</button>
@@ -459,6 +471,10 @@ async function loadSession(sid) {
       appendMessage(m.role, m.content);
       conversationLog.push({ role: m.role, content: m.content });
     }
+    // Show KB button if session has content
+    if (messages.length > 0) {
+      document.getElementById('kbUpdateBtn').classList.add('visible');
+    }
     await loadSessions();
   } catch (e) { showToast('Could not load session'); }
 }
@@ -467,7 +483,36 @@ function newSession() {
   currentSessionId = null;
   conversationLog = [];
   clearMessages();
+  document.getElementById('kbUpdateBtn').classList.remove('visible');
   loadSessions();
+}
+
+async function triggerKBUpdate() {
+  if (conversationLog.length === 0) { showToast('No conversation to update KB from'); return; }
+  const btn = document.getElementById('kbUpdateBtn');
+  btn.textContent = '📝 Extracting…';
+  btn.disabled = true;
+  const summary = conversationLog.map(m => `${m.role}: ${m.content}`).join('\n');
+  try {
+    const r = await fetch(`${API_BASE}/kb-update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'propose', sessionId: currentSessionId, conversationSummary: summary })
+    });
+    if (!r.ok) { showToast('KB update failed — try again'); return; }
+    const { proposal } = await r.json();
+    if (proposal && proposal.length > 0) {
+      renderKBProposal(proposal);
+      showToast(`${proposal.length} KB change${proposal.length > 1 ? 's' : ''} proposed — confirm below`);
+    } else {
+      showToast('No new KB updates found in this session');
+    }
+  } catch (e) {
+    showToast('KB update error — check connection');
+  } finally {
+    btn.textContent = '📝 Update KB';
+    btn.disabled = false;
+  }
 }
 
 function clearMessages() {
@@ -511,8 +556,16 @@ async function sendMessage() {
     conversationLog.push({ role: 'assistant', content: reply });
     await loadSessions();
 
-    // Check if reply contains KB update proposal trigger
-    if (reply.includes('Do you confirm these updates') || reply.includes('Writing to the KB now')) {
+    // Show KB update button after first agent response
+    document.getElementById('kbUpdateBtn').classList.add('visible');
+
+    // Auto-trigger KB proposal if agent is proposing updates
+    const kbTriggerPhrases = [
+      'do you confirm', 'shall i write', 'writing to the kb',
+      'kb update', 'update the kb', 'proposed kb', 'before i write',
+      'ready to write', 'confirmed patches'
+    ];
+    if (kbTriggerPhrases.some(p => reply.toLowerCase().includes(p))) {
       checkForKBUpdateProposal(reply);
     }
 
