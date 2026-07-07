@@ -103,6 +103,100 @@
   }
   .btn-icon:hover { background: var(--surface2); color: var(--text); }
 
+  .btn-kb {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    background: none;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-kb:hover { background: var(--accent-glow); }
+  .btn-kb:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ── KB update modal ────────────────────────────────────────────── */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 1000;
+  }
+  .modal-overlay.show { display: flex; }
+
+  .modal-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    width: 90%;
+    max-width: 560px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .modal-header span { color: var(--text-dim); font-weight: 400; font-size: 12px; display: block; margin-top: 2px; }
+
+  .modal-body {
+    padding: 16px 20px;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .kb-patch-item {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .kb-patch-item input[type="checkbox"] { margin-top: 3px; flex-shrink: 0; }
+  .kb-patch-section { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+  .kb-patch-content { font-size: 12px; color: var(--text); line-height: 1.5; white-space: pre-wrap; margin-bottom: 4px; }
+  .kb-patch-rationale { font-size: 11px; color: var(--text-dim); font-style: italic; }
+  .kb-patch-empty { font-size: 13px; color: var(--text-dim); text-align: center; padding: 20px 0; }
+
+  .modal-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .btn-modal {
+    padding: 7px 16px;
+    border-radius: var(--radius);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text-dim);
+    transition: all 0.15s;
+  }
+  .btn-modal:hover { color: var(--text); border-color: var(--text-dim); }
+  .btn-modal.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-modal.primary:hover { background: var(--accent-dim); }
+  .btn-modal:disabled { opacity: 0.5; cursor: not-allowed; }
+
   /* ── Layout ─────────────────────────────────────────────────── */
   .app-body {
     flex: 1;
@@ -436,6 +530,7 @@
   <div class="header-right">
     <div class="status-dot" id="statusDot"></div>
     <span class="status-label" id="statusLabel">Connecting…</span>
+    <button class="btn-kb" id="kbUpdateBtn" title="Review and write session updates to the knowledge base" onclick="openKbUpdateFlow()">📝 Update KB</button>
     <button class="btn-icon" title="Session history" onclick="toggleSidebar()">☰</button>
   </div>
 </header>
@@ -511,6 +606,22 @@
 
 <div class="toast" id="toast"></div>
 
+<div class="modal-overlay" id="kbModalOverlay">
+  <div class="modal-panel">
+    <div class="modal-header">
+      Proposed knowledge base updates
+      <span>Review each item below, uncheck anything you don't want written, then confirm.</span>
+    </div>
+    <div class="modal-body" id="kbModalBody">
+      <div class="kb-patch-empty">Loading…</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-modal" onclick="closeKbModal()">Cancel</button>
+      <button class="btn-modal primary" id="kbConfirmBtn" onclick="confirmKbUpdate()">Write to KB</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── Config ────────────────────────────────────────────────────────────────
 // In production this points to the Azure Functions backend URL.
@@ -522,6 +633,8 @@ const API_BASE = window.location.hostname === 'localhost'
 // ── State ─────────────────────────────────────────────────────────────────
 let currentSessionId = null;
 let isLoading = false;
+let sessionMessages = []; // { role, content } — used to build the KB update conversation summary
+let currentKbProposal = [];
 
 // ── Init ──────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
@@ -582,13 +695,20 @@ async function loadSession(sid) {
     const { messages } = await r.json();
     currentSessionId = sid;
     clearMessages();
-    for (const m of messages) appendMessage(m.role, m.content);
+    sessionMessages = [];
+    for (const m of messages) {
+      appendMessage(m.role, m.content);
+      sessionMessages.push({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content });
+    }
+    if (sessionMessages.length > 0) showKbButton(); else hideKbButton();
     await loadSessions(); // refresh active state
   } catch (e) { showToast('Could not load session'); }
 }
 
 function newSession() {
   currentSessionId = null;
+  sessionMessages = [];
+  hideKbButton();
   clearMessages();
   loadSessions();
 }
@@ -637,6 +757,9 @@ async function sendMessage() {
     const { reply, sessionId } = await r.json();
     currentSessionId = sessionId;
     appendMessage('agent', reply);
+    sessionMessages.push({ role: 'user', content: text });
+    sessionMessages.push({ role: 'assistant', content: reply });
+    showKbButton();
     await loadSessions();
 
   } catch (e) {
@@ -729,6 +852,134 @@ function setLoading(val) {
 function toggleSidebar() {
   const s = document.getElementById('sidebar');
   s.style.display = s.style.display === 'none' ? '' : 'none';
+}
+
+// ── KB update flow ──────────────────────────────────────────────────────────
+function showKbButton() {
+  document.getElementById('kbUpdateBtn').style.display = 'inline-flex';
+}
+function hideKbButton() {
+  document.getElementById('kbUpdateBtn').style.display = 'none';
+}
+
+function buildConversationSummary() {
+  // Cap length to avoid oversized requests — keep the most recent exchanges
+  const MAX_CHARS = 6000;
+  const lines = sessionMessages.map(m => `${m.role.toUpperCase()}: ${m.content}`);
+  let joined = lines.join('\n\n');
+  if (joined.length > MAX_CHARS) {
+    joined = joined.slice(joined.length - MAX_CHARS);
+  }
+  return joined;
+}
+
+async function openKbUpdateFlow() {
+  const btn = document.getElementById('kbUpdateBtn');
+  btn.disabled = true;
+  btn.textContent = '📝 Reviewing…';
+
+  const overlay = document.getElementById('kbModalOverlay');
+  const body = document.getElementById('kbModalBody');
+  body.innerHTML = '<div class="kb-patch-empty">Extracting updates from this session…</div>';
+  overlay.classList.add('show');
+
+  try {
+    const r = await fetch(`${API_BASE}/kb-update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'propose',
+        sessionId: currentSessionId,
+        conversationSummary: buildConversationSummary()
+      })
+    });
+
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      body.innerHTML = `<div class="kb-patch-empty">Could not generate a proposal — ${err.error || 'request failed'}</div>`;
+      return;
+    }
+
+    const { proposal } = await r.json();
+    currentKbProposal = Array.isArray(proposal) ? proposal : [];
+    renderKbProposal(currentKbProposal);
+
+  } catch (e) {
+    body.innerHTML = '<div class="kb-patch-empty">Connection error — could not reach the backend.</div>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📝 Update KB';
+  }
+}
+
+function renderKbProposal(proposal) {
+  const body = document.getElementById('kbModalBody');
+  const confirmBtn = document.getElementById('kbConfirmBtn');
+
+  if (!proposal.length) {
+    body.innerHTML = '<div class="kb-patch-empty">Nothing new in this session that warrants a KB update.</div>';
+    confirmBtn.style.display = 'none';
+    return;
+  }
+
+  confirmBtn.style.display = '';
+  body.innerHTML = proposal.map((p, i) => `
+    <div class="kb-patch-item">
+      <input type="checkbox" id="kbPatch${i}" checked data-idx="${i}">
+      <div>
+        <div class="kb-patch-section">${escapeHtml(p.section || 'Unknown section')}</div>
+        <div class="kb-patch-content">${escapeHtml(p.content || '')}</div>
+        ${p.rationale ? `<div class="kb-patch-rationale">${escapeHtml(p.rationale)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function closeKbModal() {
+  document.getElementById('kbModalOverlay').classList.remove('show');
+  currentKbProposal = [];
+}
+
+async function confirmKbUpdate() {
+  const checked = Array.from(document.querySelectorAll('#kbModalBody input[type="checkbox"]:checked'))
+    .map(cb => currentKbProposal[parseInt(cb.dataset.idx, 10)]);
+
+  if (!checked.length) {
+    showToast('No changes selected');
+    return;
+  }
+
+  const confirmBtn = document.getElementById('kbConfirmBtn');
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = 'Writing…';
+
+  try {
+    const r = await fetch(`${API_BASE}/kb-update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'confirm', patch: checked })
+    });
+
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      showToast(err.error || 'Write failed');
+      return;
+    }
+
+    const result = await r.json();
+    closeKbModal();
+    showToast(`KB updated — ${(result.sectionsUpdated || []).join(', ') || 'done'}`);
+
+  } catch (e) {
+    showToast('Connection error — write may not have completed');
+  } finally {
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = 'Write to KB';
+  }
 }
 
 function showToast(msg) {
