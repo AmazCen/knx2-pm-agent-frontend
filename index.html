@@ -574,14 +574,15 @@ async function sendMessage() {
     document.getElementById('kbUpdateBtn').classList.add('visible');
 
     // Auto-trigger KB proposal when agent sends the KB_UPDATE_READY signal
-    if (reply.includes('KB_UPDATE_READY_NOW')) {
-      // Hide the signal from the rendered message
-      const msgNodes = document.querySelectorAll('.msg-row.agent .msg-content');
-      const lastMsg = msgNodes[msgNodes.length - 1];
-      if (lastMsg) {
-        lastMsg.innerHTML = lastMsg.innerHTML.replace(/KB_UPDATE_READY_NOW/g, '').trim();
-      }
-      // Auto-trigger proposal card
+    // Auto-trigger when agent confirms KB update preparation
+    const kbReadyPhrases = [
+      'preparing kb update now',
+      'preparing the kb update',
+      'kb update now',
+      'capturing to the kb now',
+      'ready to capture'
+    ];
+    if (kbReadyPhrases.some(p => reply.toLowerCase().includes(p))) {
       setTimeout(() => checkForKBUpdateProposal(reply), 500);
     }
 
