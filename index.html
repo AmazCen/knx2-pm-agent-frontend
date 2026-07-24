@@ -635,8 +635,20 @@ function quickStart(text) {
 }
 
 async function checkForKBUpdateProposal(agentReply) {
-  if (!agentReply.includes('Do you confirm these updates')) return;
-  const summary = conversationLog.slice(-10).map(m => `${m.role}: ${m.content}`).join('\n');
+  // Build summary from conversationLog or fetch from session history
+  let summary = '';
+  if (conversationLog.length > 0) {
+    summary = conversationLog.slice(-20).map(m => `${m.role}: ${m.content}`).join('\n');
+  } else if (currentSessionId) {
+    try {
+      const r = await fetch(`${API_BASE}/memory?action=history&sid=${currentSessionId}`);
+      if (r.ok) {
+        const { messages } = await r.json();
+        summary = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+      }
+    } catch (e) {}
+  }
+  if (!summary) return;
   try {
     const r = await fetch(`${API_BASE}/kb-update`, {
       method: 'POST',
