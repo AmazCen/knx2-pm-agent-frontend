@@ -560,15 +560,15 @@ async function sendMessage() {
     document.getElementById('kbUpdateBtn').classList.add('visible');
 
     // Auto-trigger KB proposal when agent sends the KB_UPDATE_READY signal
-    if (reply.includes('KB_UPDATE_READY')) {
-      // Hide the signal line from the rendered message
+    if (reply.includes('[KB_UPDATE_READY]')) {
+      // Hide the signal from the rendered message
       const msgNodes = document.querySelectorAll('.msg-row.agent .msg-content');
       const lastMsg = msgNodes[msgNodes.length - 1];
       if (lastMsg) {
-        lastMsg.innerHTML = lastMsg.innerHTML.replace(/KB_UPDATE_READY/g, '').trim();
+        lastMsg.innerHTML = lastMsg.innerHTML.replace(/\[KB_UPDATE_READY\]/g, '').trim();
       }
       // Auto-trigger proposal card
-      setTimeout(() => checkForKBUpdateProposal(reply), 300);
+      setTimeout(() => checkForKBUpdateProposal(reply), 500);
     }
 
   } catch (e) {
