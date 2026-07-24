@@ -488,11 +488,25 @@ function newSession() {
 }
 
 async function triggerKBUpdate() {
-  if (conversationLog.length === 0) { showToast('No conversation to update KB from'); return; }
   const btn = document.getElementById('kbUpdateBtn');
   btn.textContent = '📝 Extracting…';
   btn.disabled = true;
-  const summary = conversationLog.map(m => `${m.role}: ${m.content}`).join('\n');
+
+  // Use conversationLog if available, otherwise fetch from session history
+  let summary = '';
+  if (conversationLog.length > 0) {
+    summary = conversationLog.map(m => `${m.role}: ${m.content}`).join('\n');
+  } else if (currentSessionId) {
+    try {
+      const r = await fetch(`${API_BASE}/memory?action=history&sid=${currentSessionId}`);
+      if (r.ok) {
+        const { messages } = await r.json();
+        summary = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+      }
+    } catch (e) { }
+  }
+
+  if (!summary) { showToast('No conversation to update KB from'); btn.textContent = '📝 Update KB'; btn.disabled = false; return; }
   try {
     const r = await fetch(`${API_BASE}/kb-update`, {
       method: 'POST',
@@ -560,12 +574,12 @@ async function sendMessage() {
     document.getElementById('kbUpdateBtn').classList.add('visible');
 
     // Auto-trigger KB proposal when agent sends the KB_UPDATE_READY signal
-    if (reply.includes('[KB_UPDATE_READY]')) {
+    if (reply.includes('KB_UPDATE_READY_NOW')) {
       // Hide the signal from the rendered message
       const msgNodes = document.querySelectorAll('.msg-row.agent .msg-content');
       const lastMsg = msgNodes[msgNodes.length - 1];
       if (lastMsg) {
-        lastMsg.innerHTML = lastMsg.innerHTML.replace(/\[KB_UPDATE_READY\]/g, '').trim();
+        lastMsg.innerHTML = lastMsg.innerHTML.replace(/KB_UPDATE_READY_NOW/g, '').trim();
       }
       // Auto-trigger proposal card
       setTimeout(() => checkForKBUpdateProposal(reply), 500);
